@@ -1,0 +1,377 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'supersecretkey';
+const rooms = {};
+const pendingJoins = {};
+
+const getParticipants = (roomId) =>
+  rooms[roomId].map((p) => ({
+    id: p.id,
+    isAdmin: p.isAdmin,
+    username: p.username,
+    handRaised: p.handRaised,
+    isMuted: p.isMuted,
+    isVideoOff: p.isVideoOff,
+    isScreenSharing: p.isScreenSharing || false,
+  }));
+
+io.on('connection', (socket) => {
+  console.log('New user connected:', socket.id);
+
+  socket.on('error', (error) => console.error('Socket error:', socket.id, error));
+
+  socket.on('generate-room', ({ isAdmin, username }, callback) => {
+    if (!isAdmin) {
+      console.log('Unauthorized room generation attempt by:', socket.id);
+      callback({ error: 'Only admins can generate rooms.' });
+      return;
+    }
+    const roomId = uuidv4();
+    rooms[roomId] = [
+      {
+        id: socket.id,
+        joinedAt: Date.now(),
+        isAdmin,
+        username: username || socket.id,
+        handRaised: false,
+        isMuted: false,
+        isVideoOff: false,
+        isScreenSharing: false,
+      },
+    ];
+    socket.join(roomId);
+    console.log(`${socket.id} (${username}) created room: ${roomId}`);
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+    callback({ roomId });
+  });
+
+  socket.on('request-to-join', ({ roomId, isAdmin, username }, callback) => {
+    console.log(`Join request by ${socket.id} to room ${roomId} as ${username}`);
+    if (!rooms[roomId]) {
+      console.log(`Join request to non-existent room ${roomId} by ${socket.id}`);
+      callback({ error: 'Room does not exist.' });
+      return;
+    }
+    if (isAdmin && rooms[roomId].some((p) => p.isAdmin)) {
+      console.log(`Multiple admin attempt in ${roomId} by ${socket.id}`);
+      callback({ error: 'Only one admin is allowed per room.' });
+      return;
+    }
+    if (!pendingJoins[roomId]) pendingJoins[roomId] = {};
+    pendingJoins[roomId][socket.id] = username;
+    socket.join(roomId);
+    console.log(`Pending join request from ${socket.id} (${username}) in room: ${roomId}`);
+
+    const admin = rooms[roomId].find((p) => p.isAdmin);
+    if (admin) {
+      io.to(admin.id).emit('pending-join', { userId: socket.id, username });
+    }
+    callback({ success: true, pending: true });
+  });
+
+  socket.on('admit-user', ({ roomId, adminToken, userId }, callback) => {
+    if (adminToken !== ADMIN_SECRET) {
+      console.log(`Unauthorized admit attempt in ${roomId} by ${socket.id}`);
+      callback({ error: 'Unauthorized action!' });
+      return;
+    }
+    const admin = rooms[roomId]?.find((p) => p.id === socket.id && p.isAdmin);
+    if (!admin) {
+      console.log(`Non-admin ${socket.id} attempted to admit user in ${roomId}`);
+      callback({ error: 'Only admin can admit users!' });
+      return;
+    }
+    console.log(`Admin admitting user ${userId} in room ${roomId}`);
+    if (rooms[roomId] && pendingJoins[roomId] && pendingJoins[roomId][userId]) {
+      const username = pendingJoins[roomId][userId];
+      rooms[roomId].push({
+        id: userId,
+        joinedAt: Date.now(),
+        isAdmin: false,
+        username: username || userId,
+        handRaised: false,
+        isMuted: false,
+        isVideoOff: false,
+        isScreenSharing: false,
+      });
+      delete pendingJoins[roomId][userId];
+      if (Object.keys(pendingJoins[roomId]).length === 0) {
+        delete pendingJoins[roomId];
+      }
+      const participants = getParticipants(roomId);
+      io.in(roomId).emit('participant-list', participants);
+      io.to(userId).emit('join-approved');
+      socket.to(roomId).emit('user-joined', { userId, participants });
+
+      if (admin.isScreenSharing) {
+        console.log(`Notifying admin ${admin.id} to initiate screen-sharing peer with new user ${userId}`);
+        io.to(admin.id).emit('initiate-screen-share-peer', { targetUser: userId });
+      }
+
+      console.log(`${userId} (${username}) admitted to room: ${roomId}`);
+      callback({ success: true });
+    } else {
+      console.log(`No pending user ${userId} in room ${roomId}`);
+      callback({ error: 'User not found or already admitted.' });
+    }
+  });
+
+  socket.on('start-screen-share', ({ roomId, sender }) => {
+    console.log(`${sender} started screen sharing in room ${roomId}`);
+    if (rooms[roomId]) {
+      const admin = rooms[roomId].find((p) => p.id === sender && p.isAdmin);
+      if (admin) {
+        admin.isScreenSharing = true;
+        console.log(`Updated isScreenSharing to true for admin ${sender} in room ${roomId}`);
+        io.in(roomId).emit('participant-list', getParticipants(roomId));
+        console.log(`Notifying all users in ${roomId} that screen sharing by ${sender} has started`);
+        io.in(roomId).emit('start-screen-share', { sender }); // Changed to io.in to include sender
+      } else {
+        console.warn(`No admin found for sender ${sender} in room ${roomId}`);
+        socket.emit('error', { message: 'Only admin can start screen sharing.' });
+      }
+    } else {
+      console.warn(`Room ${roomId} not found for screen share start by ${sender}`);
+      socket.emit('error', { message: 'Room not found.' });
+    }
+  });
+
+  socket.on('stop-screen-share', ({ roomId, sender }) => {
+    console.log(`${sender} stopped screen sharing in room ${roomId}`);
+    if (rooms[roomId]) {
+      const admin = rooms[roomId].find((p) => p.id === sender && p.isAdmin);
+      if (admin) {
+        admin.isScreenSharing = false;
+        console.log(`Updated isScreenSharing to false for admin ${sender} in room ${roomId}`);
+        io.in(roomId).emit('participant-list', getParticipants(roomId));
+        console.log(`Notifying all users in ${roomId} that screen sharing by ${sender} has ended`);
+        io.in(roomId).emit('screen-share-ended', { sender }); // Changed to io.in to include sender
+      } else {
+        console.warn(`No admin found for sender ${sender} in room ${roomId}`);
+        socket.emit('error', { message: 'Only admin can stop screen sharing.' });
+      }
+    } else {
+      console.warn(`Room ${roomId} not found for screen share stop by ${sender}`);
+      socket.emit('error', { message: 'Room not found.' });
+    }
+  });
+
+  socket.on('send-message', ({ roomId, message, sender }) => {
+    console.log(`Message from ${sender} in ${roomId}: ${message}`);
+    if (rooms[roomId]) {
+      const timestamp = new Date();
+      io.in(roomId).emit('receive-message', { sender, message, timestamp });
+    } else {
+      console.warn(`Room ${roomId} not found for message from ${sender}`);
+      socket.emit('error', { message: 'Room not found.' });
+    }
+  });
+
+  socket.on('signal', ({ roomId, signal, sender, target, streamType }) => {
+    console.log(`Signal from ${sender} to ${target} in ${roomId} for streamType ${streamType}:`, signal.type);
+    if (rooms[roomId] && target && rooms[roomId].some((p) => p.id === target)) {
+      io.to(target).emit('signal', { signal, sender, streamType });
+    } else {
+      console.warn(`Invalid target ${target} or room ${roomId} for signal from ${sender}`);
+      socket.emit('error', { message: `Signal failed: Target ${target} not found in room ${roomId}` });
+    }
+  });
+
+  socket.on('ice-candidate', ({ roomId, candidate, sender, target, streamType }) => {
+    console.log(`ICE candidate from ${sender} to ${target} in ${roomId} for streamType ${streamType}`);
+    if (rooms[roomId] && target && rooms[roomId].some((p) => p.id === target)) {
+      io.to(target).emit('ice-candidate', { candidate, sender, streamType });
+    } else {
+      console.warn(`Invalid target ${target} or room ${roomId} for ICE candidate from ${sender}`);
+      socket.emit('error', { message: `ICE candidate failed: Target ${target} not found in room ${roomId}` });
+    }
+  });
+
+  socket.on('mute-user', ({ roomId, adminToken, targetUser }) => {
+    if (adminToken !== ADMIN_SECRET) {
+      console.log(`Unauthorized mute attempt in ${roomId} by ${socket.id}`);
+      socket.emit('error', { message: 'Unauthorized action!' });
+      return;
+    }
+    const admin = rooms[roomId]?.find((p) => p.id === socket.id && p.isAdmin);
+    if (!admin) {
+      console.log(`Non-admin ${socket.id} attempted to mute user in ${roomId}`);
+      socket.emit('error', { message: 'Only admin can mute users!' });
+      return;
+    }
+    console.log(`Admin muted ${targetUser} in room: ${roomId}`);
+    rooms[roomId] = rooms[roomId].map((p) =>
+      p.id === targetUser ? { ...p, isMuted: true } : p
+    );
+    io.to(targetUser).emit('mute-audio');
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+  });
+
+  socket.on('unmute-user', ({ roomId, adminToken, targetUser }) => {
+    if (adminToken !== ADMIN_SECRET) {
+      console.log(`Unauthorized unmute attempt in ${roomId} by ${socket.id}`);
+      socket.emit('error', { message: 'Unauthorized action!' });
+      return;
+    }
+    const admin = rooms[roomId]?.find((p) => p.id === socket.id && p.isAdmin);
+    if (!admin) {
+      console.log(`Non-admin ${socket.id} attempted to unmute user in ${roomId}`);
+      socket.emit('error', { message: 'Only admin can unmute users!' });
+      return;
+    }
+    console.log(`Admin unmuted ${targetUser} in room: ${roomId}`);
+    rooms[roomId] = rooms[roomId].map((p) =>
+      p.id === targetUser ? { ...p, isMuted: false } : p
+    );
+    io.to(targetUser).emit('unmute-audio');
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+  });
+
+  socket.on('disable-video', ({ roomId, adminToken, targetUser }) => {
+    if (adminToken !== ADMIN_SECRET) {
+      console.log(`Unauthorized disable-video attempt in ${roomId} by ${socket.id}`);
+      socket.emit('error', { message: 'Unauthorized action!' });
+      return;
+    }
+    const admin = rooms[roomId]?.find((p) => p.id === socket.id && p.isAdmin);
+    if (!admin) {
+      console.log(`Non-admin ${socket.id} attempted to disable video in ${roomId}`);
+      socket.emit('error', { message: 'Only admin can disable video!' });
+      return;
+    }
+    console.log(`Admin disabled video for ${targetUser} in room: ${roomId}`);
+    rooms[roomId] = rooms[roomId].map((p) =>
+      p.id === targetUser ? { ...p, isVideoOff: true } : p
+    );
+    io.to(targetUser).emit('disable-video');
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+  });
+
+  socket.on('enable-video', ({ roomId, adminToken, targetUser }) => {
+    if (adminToken !== ADMIN_SECRET) {
+      console.log(`Unauthorized enable-video attempt in ${roomId} by ${socket.id}`);
+      socket.emit('error', { message: 'Unauthorized action!' });
+      return;
+    }
+    const admin = rooms[roomId]?.find((p) => p.id === socket.id && p.isAdmin);
+    if (!admin) {
+      console.log(`Non-admin ${socket.id} attempted to enable video in ${roomId}`);
+      socket.emit('error', { message: 'Only admin can enable video!' });
+      return;
+    }
+    console.log(`Admin enabled video for ${targetUser} in room: ${roomId}`);
+    rooms[roomId] = rooms[roomId].map((p) =>
+      p.id === targetUser ? { ...p, isVideoOff: false } : p
+    );
+    io.to(targetUser).emit('enable-video');
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+  });
+
+  socket.on('raise-hand', ({ roomId, sender }) => {
+    console.log(`${sender} raised hand in room: ${roomId}`);
+    if (rooms[roomId]) {
+      rooms[roomId] = rooms[roomId].map((p) =>
+        p.id === sender ? { ...p, handRaised: true } : p
+      );
+      io.in(roomId).emit('user-raised-hand', sender);
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
+    } else {
+      console.warn(`Room ${roomId} not found for raise-hand by ${sender}`);
+      socket.emit('error', { message: 'Room not found.' });
+    }
+  });
+
+  socket.on('lower-hand', ({ roomId, sender }) => {
+    console.log(`${sender} lowered hand in room: ${roomId}`);
+    if (rooms[roomId]) {
+      rooms[roomId] = rooms[roomId].map((p) =>
+        p.id === sender ? { ...p, handRaised: false } : p
+      );
+      io.in(roomId).emit('user-lowered-hand', sender);
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
+    } else {
+      console.warn(`Room ${roomId} not found for lower-hand by ${sender}`);
+      socket.emit('error', { message: 'Room not found.' });
+    }
+  });
+
+  socket.on('leave-room', ({ roomId, sender }) => {
+    console.log(`${sender} is leaving room ${roomId}`);
+    if (rooms[roomId]) {
+      const user = rooms[roomId].find((p) => p.id === sender);
+      if (user && user.isAdmin && user.isScreenSharing) {
+        console.log(`Admin ${sender} leaving while screen sharing, notifying participants`);
+        io.in(roomId).emit('screen-share-ended', { sender });
+      }
+      const leavingUsername = user?.username;
+      rooms[roomId] = rooms[roomId].filter((p) => p.id !== sender);
+      const participants = getParticipants(roomId);
+      if (participants.length === 0) {
+        delete rooms[roomId];
+        delete pendingJoins[roomId];
+        console.log(`Room ${roomId} deleted (empty)`);
+      } else {
+        console.log(`Emitting user-left event for ${sender} (${leavingUsername}) in room ${roomId}`);
+        io.in(roomId).emit('user-left', { participants, username: leavingUsername });
+        io.in(roomId).emit('participant-list', participants);
+      }
+      socket.leave(roomId);
+    }
+  });
+
+  socket.on('disconnecting', (reason) => {
+    console.log(`User ${socket.id} disconnecting. Reason:`, reason);
+    for (const roomId of socket.rooms) {
+      if (roomId === socket.id) continue;
+      if (rooms[roomId]) {
+        const user = rooms[roomId].find((p) => p.id === socket.id);
+        if (user && user.isAdmin && user.isScreenSharing) {
+          console.log(`Admin ${socket.id} disconnected while screen sharing, notifying participants`);
+          io.in(roomId).emit('screen-share-ended', { sender: socket.id });
+        }
+        const leavingUsername = user?.username;
+        rooms[roomId] = rooms[roomId].filter((p) => p.id !== socket.id);
+        const participants = getParticipants(roomId);
+        if (participants.length === 0) {
+          delete rooms[roomId];
+          delete pendingJoins[roomId];
+          console.log(`Room ${roomId} deleted (empty)`);
+        } else {
+          console.log(`Emitting user-left event for ${socket.id} (${leavingUsername}) in room ${roomId} due to disconnect`);
+          io.in(roomId).emit('user-left', { participants, username: leavingUsername });
+          io.in(roomId).emit('participant-list', participants);
+        }
+      }
+      if (pendingJoins[roomId] && pendingJoins[roomId][socket.id]) {
+        delete pendingJoins[roomId][socket.id];
+        if (Object.keys(pendingJoins[roomId]).length === 0) {
+          delete pendingJoins[roomId];
+        }
+        const admin = rooms[roomId]?.find((p) => p.isAdmin);
+        if (admin) {
+          io.to(admin.id).emit('pending-join-cancelled', { userId: socket.id });
+        }
+      }
+    }
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log(`User disconnected: ${socket.id}. Reason:`, reason);
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
