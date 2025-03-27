@@ -11,17 +11,17 @@ const io = new Server(server, {
     origin: process.env.FRONTEND_URL || '*',
     methods: ['GET', 'POST'],
   },
-  // Optimize socket.io for high concurrency
-  transports:['websocket'],
+  transports: ['websocket'],
   pingTimeout: 60000,
   pingInterval: 25000,
-  maxHttpBufferSize: 1e8, // Increase buffer for video streams
+  maxHttpBufferSize: 1e8,
 });
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'supersecretkey';
-const MAX_USERS_PER_ROOM = 50; // Set a reasonable limit to prevent overload
-const rooms = new Map(); // Use Map for O(1) lookups
+const MAX_USERS_PER_ROOM = 50;
+const rooms = new Map();
 const pendingJoins = new Map();
+const activeScreenShares = new Map(); // Map to track active screen share per room
 
 const getParticipants = (roomId) => {
   const participants = rooms.get(roomId) || [];
@@ -38,8 +38,6 @@ const getParticipants = (roomId) => {
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
-
-  socket.on('error', (error) => console.error('Socket error:', socket.id, error));
 
   socket.on('generate-room', ({ isAdmin, username }, callback) => {
     if (!isAdmin) {
@@ -64,7 +62,7 @@ io.on('connection', (socket) => {
     callback({ roomId });
   });
 
-  socket.on('request-to-join', ({ roomId, isAdmin, username }, callback) => {
+  socket.on('request-to-join', ({ roomId, username }, callback) => {
     if (!rooms.has(roomId)) {
       callback({ error: 'Room does not exist.' });
       return;
@@ -72,10 +70,6 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (room.size >= MAX_USERS_PER_ROOM) {
       callback({ error: 'Room is full.' });
-      return;
-    }
-    if (isAdmin && Array.from(room.values()).some((p) => p.isAdmin)) {
-      callback({ error: 'Only one admin is allowed per room.' });
       return;
     }
     if (!pendingJoins.has(roomId)) pendingJoins.set(roomId, new Map());
@@ -89,18 +83,18 @@ io.on('connection', (socket) => {
     callback({ success: true, pending: true });
   });
 
-  socket.on('admit-user', async ({ roomId, adminToken, userId }, callback) => {
+  socket.on('admit-user', ({ roomId, adminToken, userId }, callback) => {
     if (adminToken !== ADMIN_SECRET) {
       callback({ error: 'Unauthorized action!' });
       return;
     }
     const room = rooms.get(roomId);
-    if (!room || !room.has(socket.id) || !room.get(socket.id).isAdmin) {
+    if (!room || !room.get(socket.id)?.isAdmin) {
       callback({ error: 'Only admin can admit users!' });
       return;
     }
     const pendingRoom = pendingJoins.get(roomId);
-    if (pendingRoom && pendingRoom.has(userId)) {
+    if (pendingRoom?.has(userId)) {
       const username = pendingRoom.get(userId);
       room.set(userId, {
         id: userId,
@@ -115,160 +109,122 @@ io.on('connection', (socket) => {
       pendingRoom.delete(userId);
       if (pendingRoom.size === 0) pendingJoins.delete(roomId);
 
-      const participants = getParticipants(roomId);
-      io.in(roomId).emit('participant-list', participants);
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
       io.to(userId).emit('join-approved');
-      socket.to(roomId).emit('user-joined', { userId, participants });
-
-      const admin = room.get(socket.id);
-      if (admin.isScreenSharing) {
-        io.to(admin.id).emit('initiate-screen-share-peer', { targetUser: userId });
-      }
       callback({ success: true });
-    } else {
-      callback({ error: 'User not found or already admitted.' });
     }
   });
 
-  socket.on('start-screen-share', ({ roomId, sender }) => {
+  // Admin media control
+  socket.on('toggle-media', ({ roomId, type, state }) => {
     const room = rooms.get(roomId);
-    if (room && room.has(sender)) {
-      const admin = room.get(sender);
-      if (admin.isAdmin) {
-        admin.isScreenSharing = true;
-        io.in(roomId).emit('participant-list', getParticipants(roomId));
-        io.in(roomId).emit('start-screen-share', { sender });
-      } else {
-        socket.emit('error', { message: 'Only admin can start screen sharing.' });
+    if (room?.has(socket.id)) {
+      const user = room.get(socket.id);
+      if (type === 'audio') {
+        user.isMuted = state;
+        io.to(socket.id).emit(state ? 'mute-audio' : 'unmute-audio');
+      } else if (type === 'video') {
+        user.isVideoOff = state;
+        io.to(socket.id).emit(state ? 'disable-video' : 'enable-video');
       }
-    } else {
-      socket.emit('error', { message: 'Room not found.' });
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
     }
   });
 
-  socket.on('stop-screen-share', ({ roomId, sender }) => {
+  // Admin control over user media
+  socket.on('control-user-media', ({ roomId, targetUser, type, state }) => {
     const room = rooms.get(roomId);
-    if (room && room.has(sender)) {
-      const admin = room.get(sender);
-      if (admin.isAdmin) {
-        admin.isScreenSharing = false;
-        io.in(roomId).emit('participant-list', getParticipants(roomId));
-        io.in(roomId).emit('screen-share-ended', { sender });
-      } else {
-        socket.emit('error', { message: 'Only admin can stop screen sharing.' });
+    if (room?.get(socket.id)?.isAdmin && room.has(targetUser)) {
+      const user = room.get(targetUser);
+      if (type === 'audio') {
+        user.isMuted = state;
+        io.to(targetUser).emit(state ? 'mute-audio' : 'unmute-audio');
+      } else if (type === 'video') {
+        user.isVideoOff = state;
+        io.to(targetUser).emit(state ? 'disable-video' : 'enable-video');
       }
-    } else {
-      socket.emit('error', { message: 'Room not found.' });
-    }
-  });
-
-  socket.on('send-message', ({ roomId, message, sender }) => {
-    if (rooms.has(roomId)) {
-      const timestamp = new Date();
-      io.in(roomId).emit('receive-message', { sender, message, Wtimestamp });
-    } else {
-      socket.emit('error', { message: 'Room not found.' });
-    }
-  });
-
-  socket.on('signal', ({ roomId, signal, sender, target, streamType }) => {
-    const room = rooms.get(roomId);
-    if (room && room.has(target)) {
-      io.to(target).emit('signal', { signal, sender, streamType });
-    } else {
-      socket.emit('error', { message: `Signal failed: Target ${target} not found in room ${roomId}` });
-    }
-  });
-
-  socket.on('ice-candidate', ({ roomId, candidate, sender, target, streamType }) => {
-    const room = rooms.get(roomId);
-    if (room && room.has(target)) {
-      io.to(target).emit('ice-candidate', { candidate, sender, streamType });
-    } else {
-      socket.emit('error', { message: `ICE candidate failed: Target ${target} not found in room ${roomId}` });
-    }
-  });
-
-  socket.on('mute-user', ({ roomId, targetUser }) => {
-    // if (adminToken !== ADMIN_SECRET || !rooms.has(roomId)) return;
-    const room = rooms.get(roomId);
-    if (room.has(socket.id) && room.get(socket.id).isAdmin && room.has(targetUser)) {
-      const user = room.get(targetUser);
-      user.isMuted = true;
-      io.to(targetUser).emit('mute-audio');
       io.in(roomId).emit('participant-list', getParticipants(roomId));
     }
   });
 
-  socket.on('unmute-user', ({ roomId, targetUser }) => {
-    // if (adminToken !== ADMIN_SECRET || !rooms.has(roomId)) return;
+  // Admin kick user
+  socket.on('kick-user', ({ roomId, targetUser }) => {
     const room = rooms.get(roomId);
-    if (room.has(socket.id) && room.get(socket.id).isAdmin && room.has(targetUser)) {
-      const user = room.get(targetUser);
-      user.isMuted = false;
-      io.to(targetUser).emit('unmute-audio');
-      io.in(roomId).emit('participant-list', getParticipants(roomId));
-    }
-  });
-
-  socket.on('disable-video', ({ roomId, targetUser }) => {
-    // if (adminToken !== ADMIN_SECRET || !rooms.has(roomId)) return;
-    const room = rooms.get(roomId);
-    if (room.has(socket.id) && room.get(socket.id).isAdmin && room.has(targetUser)) {
-      const user = room.get(targetUser);
-      user.isVideoOff = true;
-      io.to(targetUser).emit('disable-video');
-      io.in(roomId).emit('participant-list', getParticipants(roomId));
-    }
-  });
-
-  socket.on('enable-video', ({ roomId, targetUser }) => {
-    // if (adminToken !== ADMIN_SECRET || !rooms.has(roomId)) return;
-    const room = rooms.get(roomId);
-    if (room.has(socket.id) && room.get(socket.id).isAdmin && room.has(targetUser)) {
-      const user = room.get(targetUser);
-      user.isVideoOff = false;
-      io.to(targetUser).emit('enable-video');
-      io.in(roomId).emit('participant-list', getParticipants(roomId));
-    }
-  });
-
-  socket.on('raise-hand', ({ roomId, sender }) => {
-    const room = rooms.get(roomId);
-    if (room && room.has(sender)) {
-      room.get(sender).handRaised = true;
-      io.in(roomId).emit('user-raised-hand', sender);
-      io.in(roomId).emit('participant-list', getParticipants(roomId));
-    }
-  });
-
-  socket.on('lower-hand', ({ roomId, sender }) => {
-    const room = rooms.get(roomId);
-    if (room && room.has(sender)) {
-      room.get(sender).handRaised = false;
-      io.in(roomId).emit('user-lowered-hand', sender);
-      io.in(roomId).emit('participant-list', getParticipants(roomId));
-    }
-  });
-
-  socket.on('leave-room', ({ roomId, sender }) => {
-    const room = rooms.get(roomId);
-    if (room && room.has(sender)) {
-      const user = room.get(sender);
-      if (user.isAdmin && user.isScreenSharing) {
-        io.in(roomId).emit('screen-share-ended', { sender });
+    if (room?.get(socket.id)?.isAdmin && room.has(targetUser)) {
+      const targetUserData = room.get(targetUser);
+      room.delete(targetUser);
+      io.to(targetUser).emit('kicked');
+      socket.to(roomId).emit('user-left', { 
+        participants: getParticipants(roomId), 
+        username: targetUserData.username 
+      });
+      if (activeScreenShares.get(roomId) === targetUser) {
+        activeScreenShares.delete(roomId);
+        io.in(roomId).emit('screen-share-ended', { sender: targetUser });
       }
-      const leavingUsername = user.username;
-      room.delete(sender);
-      const participants = getParticipants(roomId);
-      if (room.size === 0) {
-        rooms.delete(roomId);
-        pendingJoins.delete(roomId);
-      } else {
-        io.in(roomId).emit('user-left', { participants, username: leavingUsername });
-        io.in(roomId).emit('participant-list', participants);
-      }
-      socket.leave(roomId);
+    }
+  });
+
+  // Screen sharing
+  socket.on('request-screen-share', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room?.has(socket.id)) return;
+
+    if (activeScreenShares.has(roomId)) {
+      socket.emit('error', { message: 'Another user is already sharing their screen in this room.' });
+      return;
+    }
+
+    const user = room.get(socket.id);
+    if (user.isAdmin) {
+      user.isScreenSharing = true;
+      activeScreenShares.set(roomId, socket.id);
+      io.in(roomId).emit('start-screen-share', { sender: socket.id });
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
+    } else {
+      const admin = Array.from(room.values()).find(p => p.isAdmin);
+      io.to(admin.id).emit('screen-share-request', { userId: socket.id, username: user.username });
+    }
+  });
+
+  socket.on('approve-screen-share', ({ roomId, userId }) => {
+    const room = rooms.get(roomId);
+    if (!room?.get(socket.id)?.isAdmin || !room.has(userId)) return;
+
+    if (activeScreenShares.has(roomId)) {
+      socket.emit('error', { message: 'Another user is already sharing their screen in this room.' });
+      return;
+    }
+
+    const user = room.get(userId);
+    user.isScreenSharing = true;
+    activeScreenShares.set(roomId, userId);
+    io.in(roomId).emit('start-screen-share', { sender: userId });
+    io.in(roomId).emit('participant-list', getParticipants(roomId));
+  });
+
+  socket.on('stop-screen-share', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (room?.has(socket.id) && room.get(socket.id).isScreenSharing) {
+      room.get(socket.id).isScreenSharing = false;
+      activeScreenShares.delete(roomId);
+      io.in(roomId).emit('screen-share-ended', { sender: socket.id });
+      io.in(roomId).emit('participant-list', getParticipants(roomId));
+    }
+  });
+
+  // SFU signaling
+  socket.on('signal', ({ roomId, signal, target, streamType }) => {
+    const room = rooms.get(roomId);
+    if (room?.has(target)) {
+      io.to(target).emit('signal', { signal, sender: socket.id, streamType });
+    }
+  });
+
+  socket.on('ice-candidate', ({ roomId, candidate, target, streamType }) => {
+    const room = rooms.get(roomId);
+    if (room?.has(target)) {
+      io.to(target).emit('ice-candidate', { candidate, sender: socket.id, streamType });
     }
   });
 
@@ -276,29 +232,17 @@ io.on('connection', (socket) => {
     for (const roomId of socket.rooms) {
       if (roomId === socket.id) continue;
       const room = rooms.get(roomId);
-      if (room && room.has(socket.id)) {
+      if (room?.has(socket.id)) {
         const user = room.get(socket.id);
-        if (user.isAdmin && user.isScreenSharing) {
-          io.in(roomId).emit('screen-share-ended', { sender: socket.id });
-        }
-        const leavingUsername = user.username;
         room.delete(socket.id);
-        const participants = getParticipants(roomId);
         if (room.size === 0) {
           rooms.delete(roomId);
-          pendingJoins.delete(roomId);
-        } else {
-          io.in(roomId).emit('user-left', { participants, username: leavingUsername });
-          io.in(roomId).emit('participant-list', participants);
+          activeScreenShares.delete(roomId);
         }
-      }
-      const pendingRoom = pendingJoins.get(roomId);
-      if (pendingRoom && pendingRoom.has(socket.id)) {
-        pendingRoom.delete(socket.id);
-        if (pendingRoom.size === 0) pendingJoins.delete(roomId);
-        const admin = room?.values().find((p) => p.isAdmin);
-        if (admin) {
-          io.to(admin.id).emit('pending-join-cancelled', { userId: socket.id });
+        io.in(roomId).emit('participant-list', getParticipants(roomId));
+        if (activeScreenShares.get(roomId) === socket.id) {
+          activeScreenShares.delete(roomId);
+          io.in(roomId).emit('screen-share-ended', { sender: socket.id });
         }
       }
     }
