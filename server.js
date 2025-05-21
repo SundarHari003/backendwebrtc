@@ -555,7 +555,7 @@ async function startServer() {
           await room.connectTransport(socket.id, transportId, dtlsParameters);
           return { transportId };
         } catch (err) {
-          logError('connectTransport', err, { socketId: socket.id, transportId });
+          console.log('connectTransport', err, { socketId: socket.id, transportId });
           throw err;
         }
       }));
