@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
-
+const os = require('os');
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -18,13 +18,28 @@ const io = new Server(server, {
   }
 });
 
+function getServerIP() {
+  const interfaces = os.networkInterfaces();
+  for (const ifaceName in interfaces) {
+    for (const iface of interfaces[ifaceName]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1'; // fallback
+}
+
+const serverIP = getServerIP();
+
 // Mediasoup settings
 const mediasoupSettings = {
   worker: {
     rtcMinPort: 10000,
     rtcMaxPort: 20000, // Increase to 20000
     logLevel: 'warn',
-    logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp']
+    logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
+    announceIp: serverIP
   },
   router: {
     mediaCodecs: [
