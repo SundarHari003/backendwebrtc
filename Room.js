@@ -221,15 +221,53 @@ class Room extends EventEmitter {
     };
   }
 
-  async connectTransport(peerId, transportId, dtlsParameters) {
+  async createWebRtcTransport(peerId, direction) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
 
-    const transportData = peer.transports.get(transportId);
-    if (!transportData) throw new Error('Transport not found');
+    const transport = await this.router.createWebRtcTransport({
+      listenIps: [
+        { ip: '0.0.0.0', announcedIp: this.worker.appData.announcedIp }
+      ],
+      enableUdp: true,
+      enableTcp: true,
+      preferUdp: true,
+      initialAvailableOutgoingBitrate: 1000000,
+      enableSctp: false,
+      numSctpStreams: { OS: 1024, MIS: 1024 },
+      appData: { peerId, direction, roomId: this.roomId }
+    });
 
-    await transportData.transport.connect({ dtlsParameters });
-    return true;
+    transport.on('dtlsstatechange', (dtlsState) => {
+      console.log(`Transport ${transport.id} DTLS state: ${dtlsState}`);
+      if (dtlsState === 'closed') {
+        transport.close();
+      }
+    });
+
+    transport.on('close', () => {
+      console.log(`Transport ${transport.id} closed for peer ${peerId}`);
+      peer.transports.delete(transport.id);
+    });
+
+    const transportData = {
+      transport,
+      direction,
+      peerId,
+      createdAt: Date.now()
+    };
+
+    peer.transports.set(transport.id, transportData);
+
+    return {
+      transport,
+      params: {
+        id: transport.id,
+        iceParameters: transport.iceParameters,
+        iceCandidates: transport.iceCandidates,
+        dtlsParameters: transport.dtlsParameters
+      }
+    };
   }
 
   async produce(peerId, transportId, kind, rtpParameters, appData) {
