@@ -3,7 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
-const Room = require('./room');
+const Room = require('./Room');
 
 const app = express();
 app.use(cors());
