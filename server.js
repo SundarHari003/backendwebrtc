@@ -22,7 +22,7 @@ const io = new Server(server, {
 const mediasoupSettings = {
   worker: {
     rtcMinPort: 10000,
-    rtcMaxPort: 10100,
+    rtcMaxPort: 20000, // Increase to 20000
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp']
   },
@@ -216,16 +216,12 @@ async function startServer() {
           if (rooms.has(roomId)) {
             return callback({ success: false, error: 'Room already exists' });
           }
-
-          // Assign worker from pool
           const worker = getNextWorker();
           const router = await worker.createRouter({
             mediaCodecs: mediasoupSettings.router.mediaCodecs
           });
-
           rooms.set(roomId, new Room(router, roomId, worker));
           const room = rooms.get(roomId);
-
           const peerDetails = {
             id: socket.id,
             name: name || 'Admin',
@@ -237,23 +233,15 @@ async function startServer() {
             isAdmitted: true,
             pendingApproval: false
           };
-
           await room.addPeer(socket.id, peerDetails);
           socket.join(roomId);
-
           const users = Array.from(room.getPeers().values());
-
-          callback({
-            success: true,
-            roomId,
-            users,
-            isAdmin: true
-          });
-
+          callback({ success: true, roomId, users, isAdmin: true });
           const rtpCapabilities = room.getRouterRtpCapabilities();
+          console.log('Emitting routerCapabilities:', rtpCapabilities);
           socket.emit('routerCapabilities', rtpCapabilities);
         } catch (err) {
-          console.error('Error creating room:', err);
+          console.error('Error in createRoom:', err);
           callback({ success: false, error: err.message });
         }
       });
@@ -335,7 +323,7 @@ async function startServer() {
         }
       });
 
-      socket.on('toggle-media', async ({ roomId, type, enabled,name }, callback) => {
+      socket.on('toggle-media', async ({ roomId, type, enabled, name }, callback) => {
         try {
           const room = rooms.get(roomId);
           if (!room) {
@@ -359,7 +347,7 @@ async function startServer() {
             peerId: socket.id,
             type,
             enabled,
-            peerName:name
+            peerName: name
           });
 
           callback({ success: true });
@@ -386,11 +374,11 @@ async function startServer() {
           io.to(roomId).emit('handraise-toggle', {
             peerId: socket.id,
             enabled,
-            peerName:name
+            peerName: name
           });
 
-          console.log("handriaise",name," is ",peer.handRaise);
-          
+          console.log("handriaise", name, " is ", peer.handRaise);
+
 
           callback({ success: true });
         } catch (err) {
@@ -416,7 +404,7 @@ async function startServer() {
           io.to(roomId).emit('screenshare-toggle', {
             peerId: socket.id,
             enabled,
-            peerName:name
+            peerName: name
           });
 
           callback({ success: true });
@@ -652,13 +640,12 @@ async function startServer() {
 
       socket.on('reconnect', async ({ peerId, roomId }, callback) => {
         try {
+          console.log(`Reconnecting peer ${peerId} to room ${roomId}`);
           const room = rooms.get(roomId);
           if (!room) {
             return callback({ success: false, error: 'Room not found' });
           }
-
           if (room.getPeers().has(peerId)) {
-            // Clean up stale consumer entries for this peer
             const consumerKeys = Array.from(consumerTracking.keys())
               .filter(key => key.startsWith(`${peerId}:`));
             consumerKeys.forEach(key => {
@@ -666,19 +653,13 @@ async function startServer() {
               room.closeConsumer(peerId, consumerId);
               consumerTracking.delete(key);
             });
-
-            // Clean up transports
             room.closeTransports(peerId);
-
             await room.updatePeerSocket(peerId, socket.id);
             await socket.join(roomId);
-
             const rtpCapabilities = room.getRouterRtpCapabilities();
             socket.emit('routerCapabilities', rtpCapabilities);
-
             const producers = room.getProducerList();
             socket.emit('producerList', producers);
-
             callback({ success: true });
           } else {
             callback({ success: false, error: 'Peer not found' });
@@ -718,12 +699,10 @@ async function startServer() {
 
       socket.on('disconnect', () => {
         console.log(`Client disconnected: ${socket.id}`);
-
         Array.from(rooms.entries()).forEach(([roomId, room]) => {
           if (room.getPeers().has(socket.id)) {
             const peerDetails = room.getPeerDetails(socket.id);
             const peerName = peerDetails ? peerDetails.name : 'Unknown';
-
             // Clean up consumer tracking
             const consumerKeys = Array.from(consumerTracking.keys())
               .filter(key => key.startsWith(`${socket.id}:`));
@@ -732,12 +711,9 @@ async function startServer() {
               room.closeConsumer(socket.id, consumerId);
               consumerTracking.delete(key);
             });
-
             room.closeTransports(socket.id);
-
             room.removePeer(socket.id);
             socket.to(roomId).emit('peerClosed', { peerId: socket.id, peerName });
-
             if (room.getPeers().size === 0) {
               rooms.delete(roomId);
               console.log(`Room ${roomId} closed (no more peers)`);
