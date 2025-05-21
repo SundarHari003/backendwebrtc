@@ -269,7 +269,16 @@ class Room extends EventEmitter {
       }
     };
   }
+  async connectTransport(peerId, transportId, dtlsParameters) {
+    const peer = this.peers.get(peerId);
+    if (!peer) throw new Error('Peer not found');
 
+    const transportData = peer.transports.get(transportId);
+    if (!transportData) throw new Error('Transport not found');
+
+    await transportData.transport.connect({ dtlsParameters });
+    return true;
+  }
   async produce(peerId, transportId, kind, rtpParameters, appData) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
