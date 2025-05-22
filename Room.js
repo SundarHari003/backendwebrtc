@@ -301,7 +301,40 @@ class Room extends EventEmitter {
 
     return { producerId: producer.id };
   }
-
+  async connectTransport(peerId, transportId, dtlsParameters) {
+    const peer = this.peers.get(peerId);
+    if (!peer) {
+      console.error(`Peer ${peerId} not found`);
+      throw new Error('Peer not found');
+    }
+  
+    const transportData = peer.transports.get(transportId);
+    if (!transportData || !transportData.transport) {
+      console.error(`Transport ${transportId} not found for peer ${peerId}`);
+      throw new Error('Transport not found');
+    }
+  
+    const transport = transportData.transport;
+    if (transport.closed) {
+      console.error(`Transport ${transportId} is closed for peer ${peerId}`);
+      throw new Error('Transport is closed');
+    }
+  
+    try {
+      console.log(`Connecting transport ${transportId} for peer ${peerId}, direction: ${transportData.direction}`);
+      await transport.connect({ dtlsParameters });
+      console.log(`Transport ${transportId} connected successfully`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to connect transport ${transportId} for peer ${peerId}:`, {
+        error: error.message,
+        dtlsParameters,
+        direction: transportData.direction,
+        announcedIp: this.worker.appData.announcedIp
+      });
+      throw error; // Re-throw to be caught by wrapAsync
+    }
+  }
   // async consume(peerId, transportId, producerId, rtpCapabilities) {
   //   const peer = this.peers.get(peerId);
   //   if (!peer) throw new Error('Peer not found');
