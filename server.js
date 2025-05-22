@@ -23,7 +23,7 @@ const mediasoupSettings = {
     rtcMaxPort: 20000, // Increase to 20000
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: "172.19.21.254"
+    announcedIp: "35.160.120.126"
   },
   router: {
     mediaCodecs: [
