@@ -4,12 +4,10 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
-const axios = require('axios');
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
-
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -18,18 +16,6 @@ const io = new Server(server, {
   }
 });
 
-async function getPublicIp() {
-  try {
-    const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
-    console.log(`Fetched public IP: ${response.data.ip}`);
-    return response.data.ip;
-  } catch (error) {
-    console.error('Error fetching public IP:', error.message);
-    return '0.0.0.0'; // Fallback to env variable or default
-  }
-}
-const publicIp = await getPublicIp();
-
 // Mediasoup settings
 const mediasoupSettings = {
   worker: {
@@ -37,7 +23,7 @@ const mediasoupSettings = {
     rtcMaxPort: 20000, // Increase to 20000
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: publicIp
+    announcedIp: "172.19.21.254"
   },
   router: {
     mediaCodecs: [
@@ -547,6 +533,19 @@ async function startServer() {
       socket.on('createWebRtcTransport', wrapAsync(async ({ direction }) => {
         const roomId = Array.from(socket.rooms).find(room => room !== socket.id);
         if (!roomId) throw new Error('Not in a room');
+
+        const room = rooms.get(roomId);
+        if (!room) throw new Error('Room not found');
+
+        const { transport, params } = await room.createWebRtcTransport(socket.id, direction);
+        // Store transport reference for cleanup
+        room.storeTransport(socket.id, transport, direction);
+        return { params };
+      }));
+
+      socket.on('createWebRtcTransport', wrapAsync(async ({ direction }) => {
+        const roomId = Array.from(socket.rooms).find(room => room !== socket.id);
+        if (!roomId) throw new Error('Not in a room');
         const room = rooms.get(roomId);
         if (!room) throw new Error('Room not found');
         console.log(`Creating ${direction} transport for socket ${socket.id} in room ${roomId}`);
@@ -565,30 +564,6 @@ async function startServer() {
         await room.connectTransport(socket.id, transportId, dtlsParameters);
         console.log(`Connected transport ${transportId}`);
         return { transportId };
-      }));
-
-      socket.on('produce', wrapAsync(async ({ transportId, kind, rtpParameters, appData }) => {
-        const roomId = Array.from(socket.rooms).find(room => room !== socket.id);
-        if (!roomId) throw new Error('Not in a room');
-
-        const room = rooms.get(roomId);
-        if (!room) throw new Error('Room not found');
-
-        try {
-          const { producerId } = await room.produce(socket.id, transportId, kind, rtpParameters, appData);
-
-          socket.to(roomId).emit('newProducer', {
-            peerId: socket.id,
-            producerId,
-            kind,
-            appData
-          });
-
-          return { producerId };
-        } catch (err) {
-          logError('produce', err, { socketId: socket.id, transportId, kind });
-          throw err;
-        }
       }));
 
       socket.on('consume', wrapAsync(async ({ transportId, producerId, rtpCapabilities }) => {
