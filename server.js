@@ -4,7 +4,6 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
-const os = require('os')
 
 const app = express();
 app.use(cors());
@@ -18,24 +17,6 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   }
 });
-const ifaces = os.networkInterfaces()
-
-const getLocalIp = () => {
-    let localIp = '127.0.0.1'
-    Object.keys(ifaces).forEach((ifname) => {
-        for (const iface of ifaces[ifname]) {
-            // Ignore IPv6 and 127.0.0.1
-            if (iface.family !== 'IPv4' || iface.internal !== false) {
-                continue
-            }
-            // Set the local ip to the first IPv4 address found and exit the loop
-            localIp = iface.address
-            console.log(`Local IP: ${localIp}`);
-            return
-        }
-    })
-    return localIp
-}
 
 // Mediasoup settings
 const mediasoupSettings = {
@@ -44,7 +25,7 @@ const mediasoupSettings = {
     rtcMaxPort: 40100,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: 'https://backendwebrtc-x442.onrender.com'
+    announcedIp: 'backendwebrtc-x442.onrender.com'
   },
   router: {
     mediaCodecs: [
@@ -355,7 +336,7 @@ async function startServer() {
         }
       });
 
-      socket.on('toggle-media', async ({ roomId, type, enabled,name }, callback) => {
+      socket.on('toggle-media', async ({ roomId, type, enabled, name }, callback) => {
         try {
           const room = rooms.get(roomId);
           if (!room) {
@@ -379,7 +360,7 @@ async function startServer() {
             peerId: socket.id,
             type,
             enabled,
-            peerName:name
+            peerName: name
           });
 
           callback({ success: true });
@@ -406,11 +387,11 @@ async function startServer() {
           io.to(roomId).emit('handraise-toggle', {
             peerId: socket.id,
             enabled,
-            peerName:name
+            peerName: name
           });
 
-          console.log("handriaise",name," is ",peer.handRaise);
-          
+          console.log("handriaise", name, " is ", peer.handRaise);
+
 
           callback({ success: true });
         } catch (err) {
@@ -436,7 +417,7 @@ async function startServer() {
           io.to(roomId).emit('screenshare-toggle', {
             peerId: socket.id,
             enabled,
-            peerName:name
+            peerName: name
           });
 
           callback({ success: true });
@@ -622,20 +603,21 @@ async function startServer() {
 
         const room = rooms.get(roomId);
         if (!room) throw new Error('Room not found');
-        // Validate transport state
+
         const transport = room.getTransport(socket.id, transportId);
         if (!transport || transport.closed) {
           throw new Error('Invalid or closed transport');
         }
-        // Prevent duplicate consumers
+
         const consumerKey = `${socket.id}:${producerId}`;
         if (consumerTracking.has(consumerKey)) {
           const existingConsumerId = consumerTracking.get(consumerKey);
           const consumer = room.getConsumer(socket.id, existingConsumerId);
           if (consumer && !consumer.closed) {
+            console.log(`Consumer already exists for peer ${socket.id}, producer ${producerId}`);
             throw new Error('Consumer already exists for this producer');
           } else {
-            // Clean up stale consumer entry
+            console.log(`Cleaning up stale consumer for peer ${socket.id}, producer ${producerId}`);
             consumerTracking.delete(consumerKey);
             room.closeConsumer(socket.id, existingConsumerId);
           }
@@ -643,10 +625,8 @@ async function startServer() {
 
         try {
           const { params, consumerId } = await room.consume(socket.id, transportId, producerId, rtpCapabilities);
-
-          // Track consumer
           consumerTracking.set(consumerKey, consumerId);
-
+          console.log(`Consumer created: ${consumerId} for peer ${socket.id}, producer ${producerId}`);
           return { params, consumerId };
         } catch (err) {
           logError('consume', err, { socketId: socket.id, transportId, producerId });
@@ -663,6 +643,7 @@ async function startServer() {
 
         try {
           await room.resumeConsumer(socket.id, consumerId);
+          console.log(`Consumer resumed: ${consumerId} for peer ${socket.id}`);
           return { consumerId };
         } catch (err) {
           logError('resumeConsumer', err, { socketId: socket.id, consumerId });
