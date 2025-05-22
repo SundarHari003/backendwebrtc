@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
+const os = require('os')
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,25 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   }
 });
+const ifaces = os.networkInterfaces()
+
+const getLocalIp = () => {
+    let localIp = '127.0.0.1'
+    Object.keys(ifaces).forEach((ifname) => {
+        for (const iface of ifaces[ifname]) {
+            // Ignore IPv6 and 127.0.0.1
+            if (iface.family !== 'IPv4' || iface.internal !== false) {
+                continue
+            }
+            // Set the local ip to the first IPv4 address found and exit the loop
+            localIp = iface.address
+            console.log(`Local IP: ${localIp}`);
+            
+            return
+        }
+    })
+    return localIp
+}
 
 // Mediasoup settings
 const mediasoupSettings = {
@@ -25,7 +45,7 @@ const mediasoupSettings = {
     rtcMaxPort: 10100,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: '192.168.1.118'
+    announcedIp: getLocalIp()
   },
   router: {
     mediaCodecs: [

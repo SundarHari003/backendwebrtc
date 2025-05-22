@@ -1,5 +1,25 @@
 const EventEmitter = require('events');
+const os = require('os');
+const ifaces = os.networkInterfaces()
 
+const getLocalIp = () => {
+    let localIp = '127.0.0.1'
+    Object.keys(ifaces).forEach((ifname) => {
+        for (const iface of ifaces[ifname]) {
+            // Ignore IPv6 and 127.0.0.1
+            if (iface.family !== 'IPv4' || iface.internal !== false) {
+                continue
+            }
+            // Set the local ip to the first IPv4 address found and exit the loop
+            localIp = iface.address
+            console.log(`Local IP: ${localIp}`);
+            
+            return
+        }
+    })
+    return localIp
+}
+const localIp = getLocalIp();
 class Room extends EventEmitter {
   constructor(router, roomId, worker) {
     super();
@@ -179,7 +199,7 @@ class Room extends EventEmitter {
 
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: '192.168.1.118' }
+        { ip: '0.0.0.0', announcedIp: localIp }
       ],
       enableUdp: true,
       enableTcp: true,
