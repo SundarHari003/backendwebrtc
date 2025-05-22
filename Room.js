@@ -179,7 +179,7 @@ class Room extends EventEmitter {
 
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: process.env.ANNOUNCED_IP || '127.0.0.1' }
+        { ip: '0.0.0.0', announcedIp: "172.19.21.254" || '127.0.0.1' }
       ],
       enableUdp: true,
       enableTcp: true,
@@ -221,54 +221,54 @@ class Room extends EventEmitter {
     };
   }
 
-  async createWebRtcTransport(peerId, direction) {
-    const peer = this.peers.get(peerId);
-    if (!peer) throw new Error('Peer not found');
+  // async createWebRtcTransport(peerId, direction) {
+  //   const peer = this.peers.get(peerId);
+  //   if (!peer) throw new Error('Peer not found');
 
-    const transport = await this.router.createWebRtcTransport({
-      listenIps: [
-        { ip: '0.0.0.0', announcedIp: this.worker.appData.announcedIp }
-      ],
-      enableUdp: true,
-      enableTcp: true,
-      preferUdp: true,
-      initialAvailableOutgoingBitrate: 1000000,
-      enableSctp: false,
-      numSctpStreams: { OS: 1024, MIS: 1024 },
-      appData: { peerId, direction, roomId: this.roomId }
-    });
+  //   const transport = await this.router.createWebRtcTransport({
+  //     listenIps: [
+  //       { ip: '0.0.0.0', announcedIp: this.worker.appData.announcedIp }
+  //     ],
+  //     enableUdp: true,
+  //     enableTcp: true,
+  //     preferUdp: true,
+  //     initialAvailableOutgoingBitrate: 1000000,
+  //     enableSctp: false,
+  //     numSctpStreams: { OS: 1024, MIS: 1024 },
+  //     appData: { peerId, direction, roomId: this.roomId }
+  //   });
 
-    transport.on('dtlsstatechange', (dtlsState) => {
-      console.log(`Transport ${transport.id} DTLS state: ${dtlsState}`);
-      if (dtlsState === 'closed') {
-        transport.close();
-      }
-    });
+  //   transport.on('dtlsstatechange', (dtlsState) => {
+  //     console.log(`Transport ${transport.id} DTLS state: ${dtlsState}`);
+  //     if (dtlsState === 'closed') {
+  //       transport.close();
+  //     }
+  //   });
 
-    transport.on('close', () => {
-      console.log(`Transport ${transport.id} closed for peer ${peerId}`);
-      peer.transports.delete(transport.id);
-    });
+  //   transport.on('close', () => {
+  //     console.log(`Transport ${transport.id} closed for peer ${peerId}`);
+  //     peer.transports.delete(transport.id);
+  //   });
 
-    const transportData = {
-      transport,
-      direction,
-      peerId,
-      createdAt: Date.now()
-    };
+  //   const transportData = {
+  //     transport,
+  //     direction,
+  //     peerId,
+  //     createdAt: Date.now()
+  //   };
 
-    peer.transports.set(transport.id, transportData);
+  //   peer.transports.set(transport.id, transportData);
 
-    return {
-      transport,
-      params: {
-        id: transport.id,
-        iceParameters: transport.iceParameters,
-        iceCandidates: transport.iceCandidates,
-        dtlsParameters: transport.dtlsParameters
-      }
-    };
-  }
+  //   return {
+  //     transport,
+  //     params: {
+  //       id: transport.id,
+  //       iceParameters: transport.iceParameters,
+  //       iceCandidates: transport.iceCandidates,
+  //       dtlsParameters: transport.dtlsParameters
+  //     }
+  //   };
+  // }
 
   async produce(peerId, transportId, kind, rtpParameters, appData) {
     const peer = this.peers.get(peerId);
