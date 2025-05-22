@@ -31,7 +31,6 @@ const getLocalIp = () => {
             // Set the local ip to the first IPv4 address found and exit the loop
             localIp = iface.address
             console.log(`Local IP: ${localIp}`);
-            
             return
         }
     })
@@ -41,11 +40,11 @@ const getLocalIp = () => {
 // Mediasoup settings
 const mediasoupSettings = {
   worker: {
-    rtcMinPort: 10000,
-    rtcMaxPort: 10100,
+    rtcMinPort: 40000,
+    rtcMaxPort: 40100,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: getLocalIp()
+    announcedIp: 'https://backendwebrtc-x442.onrender.com'
   },
   router: {
     mediaCodecs: [
