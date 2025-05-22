@@ -179,7 +179,7 @@ class Room extends EventEmitter {
 
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: process.env.ANNOUNCED_IP || '127.0.0.1' }
+        { ip: '0.0.0.0', announcedIp: '192.168.1.118' }
       ],
       enableUdp: true,
       enableTcp: true,

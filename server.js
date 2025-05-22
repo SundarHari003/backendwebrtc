@@ -25,7 +25,7 @@ const mediasoupSettings = {
     rtcMaxPort: 10100,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announceIp: '35.160.120.126'
+    announcedIp: '192.168.1.118'
   },
   router: {
     mediaCodecs: [
