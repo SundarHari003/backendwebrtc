@@ -179,7 +179,7 @@ class Room extends EventEmitter {
 
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: "35.160.120.126"}
+        { ip: '0.0.0.0', announcedIp: process.env.ANNOUNCED_IP || '127.0.0.1' }
       ],
       enableUdp: true,
       enableTcp: true,
@@ -221,6 +221,17 @@ class Room extends EventEmitter {
     };
   }
 
+  async connectTransport(peerId, transportId, dtlsParameters) {
+    const peer = this.peers.get(peerId);
+    if (!peer) throw new Error('Peer not found');
+
+    const transportData = peer.transports.get(transportId);
+    if (!transportData) throw new Error('Transport not found');
+
+    await transportData.transport.connect({ dtlsParameters });
+    return true;
+  }
+
   async produce(peerId, transportId, kind, rtpParameters, appData) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
@@ -252,41 +263,79 @@ class Room extends EventEmitter {
 
     return { producerId: producer.id };
   }
-  async connectTransport(peerId, transportId, dtlsParameters) {
-    const peer = this.peers.get(peerId);
-    if (!peer) {
-      console.error(`Peer ${peerId} not found`);
-      throw new Error('Peer not found');
-    }
-  
-    const transportData = peer.transports.get(transportId);
-    if (!transportData || !transportData.transport) {
-      console.error(`Transport ${transportId} not found for peer ${peerId}`);
-      throw new Error('Transport not found');
-    }
-  
-    const transport = transportData.transport;
-    if (transport.closed) {
-      console.error(`Transport ${transportId} is closed for peer ${peerId}`);
-      throw new Error('Transport is closed');
-    }
-  
-    try {
-      console.log(`Connecting transport ${transportId} for peer ${peerId}, direction: ${transportData.direction}`);
-      await transport.connect({ dtlsParameters });
-      console.log(`Transport ${transportId} connected successfully`);
-      return true;
-    } catch (error) {
-      console.error(`Failed to connect transport ${transportId} for peer ${peerId}:`, {
-        error: error.message,
-        dtlsParameters,
-        direction: transportData.direction,
-        announcedIp: "35.160.120.126"
-      });
-      throw error; // Re-throw to be caught by wrapAsync
-    }
-  }
- 
+
+  // async consume(peerId, transportId, producerId, rtpCapabilities) {
+  //   const peer = this.peers.get(peerId);
+  //   if (!peer) throw new Error('Peer not found');
+
+  //   const transportData = peer.transports.get(transportId);
+  //   if (!transportData) throw new Error('Transport not found');
+
+  //   if (transportData.direction !== 'recv') {
+  //     throw new Error('Transport not configured for receiving');
+  //   }
+
+  //   // Validate rtpCapabilities
+  //   if (!rtpCapabilities || !rtpCapabilities.codecs) {
+  //     throw new Error('Invalid RTP capabilities');
+  //   }
+
+  //   // Check if we can consume this producer
+  //   const canConsume = this.router.canConsume({
+  //     producerId,
+  //     rtpCapabilities
+  //   });
+
+  //   if (!canConsume) {
+  //     const error = new Error('Cannot consume this producer');
+  //     error.details = {
+  //       producerId,
+  //       rtpCapabilities,
+  //       routerCapabilities: this.router.rtpCapabilities
+  //     };
+  //     throw error;
+  //   }
+
+  //   // Find the producer to get its appData
+  //   let producerAppData = {};
+  //   for (const peer of this.peers.values()) {
+  //     const producer = peer.producers.get(producerId);
+  //     if (producer) {
+  //       producerAppData = producer.appData;
+  //       break;
+  //     }
+  //   }
+
+  //   const consumer = await transportData.transport.consume({
+  //     producerId,
+  //     rtpCapabilities,
+  //     paused: true,
+  //     appData: { peerId, roomId: this.roomId, mediaType: producerAppData.mediaType || 'unknown' } // Include mediaType
+  //   });
+
+  //   consumer.on('transportclose', () => {
+  //     consumer.close();
+  //   });
+
+  //   consumer.on('producerclose', () => {
+  //     peer.consumers.delete(consumer.id);
+  //     this.emit('consumerClosed', { peerId, consumerId: consumer.id });
+  //   });
+
+  //   peer.consumers.set(consumer.id, consumer);
+  //   this.emit('consumerCreated', { peerId, consumerId: consumer.id });
+
+  //   return {
+  //     consumer,
+  //     params: {
+  //       id: consumer.id,
+  //       producerId: consumer.producerId,
+  //       kind: consumer.kind,
+  //       rtpParameters: consumer.rtpParameters,
+  //       appData: consumer.appData // Include appData in consumer params
+  //     }
+  //   };
+  // }
   async consume(peerId, transportId, producerId, rtpCapabilities) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
