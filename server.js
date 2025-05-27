@@ -4,28 +4,36 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
-
+const https = require('https');
+const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
-
-const server = http.createServer(app);
+const server = https.createServer({
+  cert: fs.readFileSync('./ssl/cert.pem'),
+  key: fs.readFileSync('./ssl/key.pem')
+}, app);
+// const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
   }
 });
-
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // Limit each IP to 100 requests per windowMs
+}));
 // Mediasoup settings
 const mediasoupSettings = {
   worker: {
     rtcMinPort: 40000,
-    rtcMaxPort: 40100,
+    rtcMaxPort: 49999,
     logLevel: 'warn',
-    logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-    announcedIp: 'backendwebrtc-x442.onrender.com'
+    logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp', 'rtx', 'bwe', 'score', 'simulcast'],
+    announcedIp: 'vehicle-facility.gl.at.ply.gg'
   },
   router: {
     mediaCodecs: [
@@ -44,7 +52,9 @@ const mediasoupSettings = {
         mimeType: 'video/VP8',
         clockRate: 90000,
         parameters: {
-          'x-google-start-bitrate': 1000
+          'x-google-start-bitrate': 1000,
+          'x-google-min-bitrate': 500,
+          'x-google-max-bitrate': 3000
         }
       },
       {
@@ -54,10 +64,56 @@ const mediasoupSettings = {
         parameters: {
           'packetization-mode': 1,
           'profile-level-id': '42e01f',
-          'level-asymmetry-allowed': 1
+          'level-asymmetry-allowed': 1,
+          'x-google-start-bitrate': 1000,
+          'x-google-min-bitrate': 500,
+          'x-google-max-bitrate': 3000
         }
       }
     ]
+  },
+  webRtcTransportOptions: {
+    listenIps: [
+      {
+        ip: '0.0.0.0',
+        announcedIp: 'vehicle-facility.gl.at.ply.gg' // Will be set dynamically
+      }
+    ],
+    initialAvailableOutgoingBitrate: 1000000,
+    minimumAvailableOutgoingBitrate: 600000,
+    maxIncomingBitrate: 1500000,
+    enableUdp: true,
+    enableTcp: true,
+    preferUdp: true,
+    enableSctp: true,
+    iceConsentTimeout: 30,
+    iceServers: [
+      {
+        urls: "stun:stun.relay.metered.ca:80",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "809b412749942c1dd719a575",
+        credential: "IGrizVaKruezuMCE",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "809b412749942c1dd719a575",
+        credential: "IGrizVaKruezuMCE",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "809b412749942c1dd719a575",
+        credential: "IGrizVaKruezuMCE",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=udp",
+        username: "809b412749942c1dd719a575",
+        credential: "IGrizVaKruezuMCE",
+      },
+    ],
+    iceTransportPolicy: 'relay'
+
   }
 };
 
@@ -554,6 +610,8 @@ async function startServer() {
         const { transport, params } = await room.createWebRtcTransport(socket.id, direction);
         // Store transport reference for cleanup
         room.storeTransport(socket.id, transport, direction);
+        console.log(params,"checl");
+        
         return { params };
       }));
 
@@ -615,7 +673,7 @@ async function startServer() {
           const consumer = room.getConsumer(socket.id, existingConsumerId);
           if (consumer && !consumer.closed) {
             console.log(`Consumer already exists for peer ${socket.id}, producer ${producerId}`);
-            throw new Error('Consumer already exists for this producer');
+            // throw new Error('Consumer already exists for this producer');
           } else {
             console.log(`Cleaning up stale consumer for peer ${socket.id}, producer ${producerId}`);
             consumerTracking.delete(consumerKey);

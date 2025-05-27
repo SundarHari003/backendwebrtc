@@ -199,15 +199,17 @@ class Room extends EventEmitter {
 
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: 'backendwebrtc-x442.onrender.com' }
+        { ip: '0.0.0.0', announcedIp: 'vehicle-facility.gl.at.ply.gg' }
       ],
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,
       initialAvailableOutgoingBitrate: 1000000,
+      minimumAvailableOutgoingBitrate: 600000,
+      maxIncomingBitrate: 1500000,
       enableSctp: false,
       numSctpStreams: { OS: 1024, MIS: 1024 },
-      appData: { peerId, direction, roomId: this.roomId }
+      appData: { peerId, direction, roomId: this.roomId },
     });
 
     transport.on('dtlsstatechange', (dtlsState) => {
@@ -236,7 +238,7 @@ class Room extends EventEmitter {
         id: transport.id,
         iceParameters: transport.iceParameters,
         iceCandidates: transport.iceCandidates,
-        dtlsParameters: transport.dtlsParameters
+        dtlsParameters: transport.dtlsParameters,
       }
     };
   }
