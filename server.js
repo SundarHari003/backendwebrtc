@@ -33,7 +33,7 @@ const mediasoupSettings = {
     rtcMaxPort: 49999,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp', 'rtx', 'bwe', 'score', 'simulcast'],
-    announcedIp: 'vehicle-facility.gl.at.ply.gg'
+    announcedIp: '10.204.253.43'
   },
   router: {
     mediaCodecs: [
@@ -76,7 +76,7 @@ const mediasoupSettings = {
     listenIps: [
       {
         ip: '0.0.0.0',
-        announcedIp: 'vehicle-facility.gl.at.ply.gg' // Will be set dynamically
+        announcedIp: '10.204.253.43' // Will be set dynamically
       }
     ],
     initialAvailableOutgoingBitrate: 1000000,
