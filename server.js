@@ -772,7 +772,7 @@ async function startServer() {
       });
     });
 
-    const PORT = process.env.PORT || 3001;
+    const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
       console.log(`Worker pool initialized with ${WORKER_POOL_SIZE} workers`);
