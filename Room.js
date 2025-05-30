@@ -1,7 +1,7 @@
 const EventEmitter = require('events');
 
 class Room extends EventEmitter {
-  constructor(router, roomId, worker, webRtcServer, localIp) {
+  constructor(router, roomId, worker, webRtcServer, localIp="184.72.81.244") {
     super();
     this.localIp = localIp;
     this.router = router;

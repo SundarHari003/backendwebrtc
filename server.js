@@ -47,7 +47,7 @@ const mediasoupSettings = {
     rtcMaxPort: 49999,
     logLevel: 'debug',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp', 'rtx', 'bwe', 'score', 'simulcast'],
-    announcedIp: localIp
+    announcedIp: '184.72.81.244'
   },
   router: {
     mediaCodecs: [
@@ -91,13 +91,13 @@ const mediasoupSettings = {
       {
         protocol: 'udp',
         ip: '0.0.0.0',
-        announcedIp: localIp,
+        announcedIp: '184.72.81.244',
         portRange: { min: 40000, max: 49999 }
       },
       {
         protocol: 'tcp',
         ip: '0.0.0.0',
-        announcedIp: localIp,
+        announcedIp: '184.72.81.244',
         portRange: { min: 40000, max: 49999 }
       }
     ],
@@ -146,13 +146,13 @@ async function initializeWorkerPool() {
         {
           protocol: 'udp',
           ip: '0.0.0.0',
-          announcedIp: localIp, // Your public IP
+          announcedIp: '184.72.81.244', // Your public IP
           portRange: { min: 40000, max: 49999 }// Distribute ports across workers
         },
         {
           protocol: 'tcp',
           ip: '0.0.0.0',
-          announcedIp: localIp, // Your public IP
+          announcedIp: '184.72.81.244', // Your public IP
           portRange: { min: 40000, max: 49999 }// Same port for TCP
         }
       ]
@@ -301,7 +301,7 @@ async function startServer() {
             mediaCodecs: mediasoupSettings.router.mediaCodecs
           });
 
-          rooms.set(roomId, new Room(router, roomId, worker, webRtcServer, localIp));
+          rooms.set(roomId, new Room(router, roomId, worker, webRtcServer));
           const room = rooms.get(roomId);
 
           const peerDetails = {
