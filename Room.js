@@ -178,12 +178,14 @@ class Room extends EventEmitter {
   async createWebRtcTransport(peerId, direction) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
-    console.log(`Room created with ID: ${roomId}, Worker: ${worker.id}, WebRTC Server: ${webRtcServer.id}, Local IP: ${localIp}`);
+    console.log(`Room created with ID: ${this.roomId}, WebRTC Server: ${this.webRtcServer.id}, Local IP: ${this.localIp}`);
+    console.log( this.worker);
+    
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: localIp }
+        { ip: '0.0.0.0', announcedIp: this.localIp }
       ],
-      webRtcServer: workerEntry.webRtcServer,
+      webRtcServer: this.webRtcServer,
       enableSrtp: true,
       enableUdp: true,
       enableTcp: true,

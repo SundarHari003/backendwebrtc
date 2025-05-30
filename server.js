@@ -8,21 +8,21 @@ const os = require('os');
 const ifaces = os.networkInterfaces()
 
 const getLocalIp = () => {
-    let localIp = '127.0.0.1'
-    Object.keys(ifaces).forEach((ifname) => {
-        for (const iface of ifaces[ifname]) {
-            // Ignore IPv6 and 127.0.0.1
-            if (iface.family !== 'IPv4' || iface.internal !== false) {
-                continue
-            }
-            // Set the local ip to the first IPv4 address found and exit the loop
-            localIp = iface.address
-            console.log(`Local IP: ${localIp}`);
-            
-            return
-        }
-    })
-    return localIp
+  let localIp = '127.0.0.1'
+  Object.keys(ifaces).forEach((ifname) => {
+    for (const iface of ifaces[ifname]) {
+      // Ignore IPv6 and 127.0.0.1
+      if (iface.family !== 'IPv4' || iface.internal !== false) {
+        continue
+      }
+      // Set the local ip to the first IPv4 address found and exit the loop
+      localIp = iface.address
+      console.log(`Local IP: ${localIp}`);
+
+      return
+    }
+  })
+  return localIp
 }
 
 const localIp = getLocalIp();
@@ -141,7 +141,7 @@ async function createWorker() {
 async function initializeWorkerPool() {
   for (let i = 0; i < WORKER_POOL_SIZE; i++) {
     const worker = await createWorker();
-     const webRtcServer = await worker.createWebRtcServer({
+    const webRtcServer = await worker.createWebRtcServer({
       listenInfos: [
         {
           protocol: 'udp',
@@ -157,7 +157,7 @@ async function initializeWorkerPool() {
         }
       ]
     });
-    
+
     workers.push({
       worker,
       webRtcServer
@@ -167,9 +167,12 @@ async function initializeWorkerPool() {
 }
 
 function getNextWorker() {
-  const worker = workers[nextWorkerIndex];
+  const workerEntry = workers[nextWorkerIndex];
   nextWorkerIndex = (nextWorkerIndex + 1) % workers.length;
-  return worker;
+  return {
+    worker: workerEntry.worker,
+    webRtcServer: workerEntry.webRtcServer
+  };
 }
 
 // Health check endpoint with worker pool status
@@ -256,7 +259,7 @@ process.on('SIGTERM', async () => {
 async function startServer() {
   try {
     console.log(`Starting server with mediasoup v${mediasoup.version}`);
-  console.log(`Local IP announceid: ${mediasoupSettings.worker.announcedIp}`);
+    console.log(`Local IP announceid: ${mediasoupSettings.worker.announcedIp}`);
     await initializeWorkerPool();
 
     io.on('connection', async (socket) => {
@@ -293,13 +296,12 @@ async function startServer() {
           }
 
           // Assign worker from pool
-          const worker = getNextWorker();
+          const { worker, webRtcServer } = getNextWorker();
           const router = await worker.createRouter({
             mediaCodecs: mediasoupSettings.router.mediaCodecs
           });
 
-          rooms.set(roomId, new Room(router, roomId, worker, worker.webRtcServer,localIp));
-          console.log(`Room created: ${roomId} with worker PID ${worker.worker.pid}`);
+          rooms.set(roomId, new Room(router, roomId, worker, webRtcServer, localIp));
           const room = rooms.get(roomId);
 
           const peerDetails = {
