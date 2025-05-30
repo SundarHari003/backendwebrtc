@@ -1,7 +1,7 @@
 const EventEmitter = require('events');
 
 class Room extends EventEmitter {
-  constructor(router, roomId, worker,webRtcServer,localIp) {
+  constructor(router, roomId, worker, webRtcServer, localIp) {
     super();
     this.localIp = localIp;
     this.router = router;
@@ -179,8 +179,8 @@ class Room extends EventEmitter {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
     console.log(`Room created with ID: ${this.roomId}, WebRTC Server: ${this.webRtcServer.id}, Local IP: ${this.localIp}`);
-    console.log( this.worker);
-    
+    console.log(this.worker);
+
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
         { ip: '0.0.0.0', announcedIp: this.localIp }
@@ -202,6 +202,14 @@ class Room extends EventEmitter {
       if (dtlsState === 'closed') {
         transport.close();
       }
+    });
+
+    transport.on('icecandidate', (candidate) => {
+      console.log(`Transport ${transport.id} ICE candidate:`, candidate);
+    });
+
+    transport.on('icestatechange', (state) => {
+      console.log(`Transport ${transport.id} ICE state changed to: ${state}`);
     });
 
     transport.on('close', () => {
