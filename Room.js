@@ -1,32 +1,14 @@
 const EventEmitter = require('events');
-const os = require('os');
-const ifaces = os.networkInterfaces()
 
-const getLocalIp = () => {
-    let localIp = '127.0.0.1'
-    Object.keys(ifaces).forEach((ifname) => {
-        for (const iface of ifaces[ifname]) {
-            // Ignore IPv6 and 127.0.0.1
-            if (iface.family !== 'IPv4' || iface.internal !== false) {
-                continue
-            }
-            // Set the local ip to the first IPv4 address found and exit the loop
-            localIp = iface.address
-            console.log(`Local IP: ${localIp}`);
-            
-            return
-        }
-    })
-    return localIp
-}
-const localIp = getLocalIp();
 class Room extends EventEmitter {
-  constructor(router, roomId, worker) {
+  constructor(router, roomId, worker,webRtcServer,localIp) {
     super();
+    this.localIp = localIp;
     this.router = router;
     this.roomId = roomId;
     this.worker = worker;
     this.peers = new Map();
+    this.webRtcServer = webRtcServer;
     this.pendingPeers = new Map();
     this.producers = new Map();
     this.consumers = new Map();
@@ -196,11 +178,13 @@ class Room extends EventEmitter {
   async createWebRtcTransport(peerId, direction) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error('Peer not found');
-
+    console.log(`Room created with ID: ${roomId}, Worker: ${worker.id}, WebRTC Server: ${webRtcServer.id}, Local IP: ${localIp}`);
     const transport = await this.router.createWebRtcTransport({
       listenIps: [
-        { ip: '0.0.0.0', announcedIp: '184.72.81.244' }
+        { ip: '0.0.0.0', announcedIp: localIp }
       ],
+      webRtcServer: workerEntry.webRtcServer,
+      enableSrtp: true,
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,

@@ -4,6 +4,28 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
+const os = require('os');
+const ifaces = os.networkInterfaces()
+
+const getLocalIp = () => {
+    let localIp = '127.0.0.1'
+    Object.keys(ifaces).forEach((ifname) => {
+        for (const iface of ifaces[ifname]) {
+            // Ignore IPv6 and 127.0.0.1
+            if (iface.family !== 'IPv4' || iface.internal !== false) {
+                continue
+            }
+            // Set the local ip to the first IPv4 address found and exit the loop
+            localIp = iface.address
+            console.log(`Local IP: ${localIp}`);
+            
+            return
+        }
+    })
+    return localIp
+}
+
+const localIp = getLocalIp();
 
 const app = express();
 app.use(cors());
@@ -23,9 +45,9 @@ const mediasoupSettings = {
   worker: {
     rtcMinPort: 40000,
     rtcMaxPort: 49999,
-    logLevel: 'warn',
+    logLevel: 'debug',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp', 'rtx', 'bwe', 'score', 'simulcast'],
-    announcedIp: '184.72.81.244'
+    announcedIp: localIp
   },
   router: {
     mediaCodecs: [
@@ -65,10 +87,18 @@ const mediasoupSettings = {
     ]
   },
   webRtcTransportOptions: {
-    listenIps: [
+    listenInfos: [
       {
+        protocol: 'udp',
         ip: '0.0.0.0',
-        announcedIp: '184.72.81.244' // Will be set dynamically
+        announcedIp: localIp,
+        port: 40000
+      },
+      {
+        protocol: 'tcp',
+        ip: '0.0.0.0',
+        announcedIp: localIp,
+        port: 40000
       }
     ],
     initialAvailableOutgoingBitrate: 1000000,
@@ -111,8 +141,28 @@ async function createWorker() {
 async function initializeWorkerPool() {
   for (let i = 0; i < WORKER_POOL_SIZE; i++) {
     const worker = await createWorker();
-    workers.push(worker);
-    console.log(`Worker ${i + 1} created (PID: ${worker.pid})`);
+     const webRtcServer = await worker.createWebRtcServer({
+      listenInfos: [
+        {
+          protocol: 'udp',
+          ip: '0.0.0.0',
+          announcedIp: localIp, // Your public IP
+          port: 40000 + (i * 100) // Distribute ports across workers
+        },
+        {
+          protocol: 'tcp',
+          ip: '0.0.0.0',
+          announcedIp: localIp, // Your public IP
+          port: 40000 + (i * 100) // Same port for TCP
+        }
+      ]
+    });
+    
+    workers.push({
+      worker,
+      webRtcServer
+    });
+    console.log(`Worker ${i + 1} created (PID: ${worker.pid}) with WebRtcServer`);
   }
 }
 
@@ -206,7 +256,7 @@ process.on('SIGTERM', async () => {
 async function startServer() {
   try {
     console.log(`Starting server with mediasoup v${mediasoup.version}`);
-
+  console.log(`Local IP announceid: ${mediasoupSettings.worker.announcedIp}`);
     await initializeWorkerPool();
 
     io.on('connection', async (socket) => {
@@ -248,7 +298,8 @@ async function startServer() {
             mediaCodecs: mediasoupSettings.router.mediaCodecs
           });
 
-          rooms.set(roomId, new Room(router, roomId, worker));
+          rooms.set(roomId, new Room(router, roomId, worker, worker.webRtcServer,localIp));
+          console.log(`Room created: ${roomId} with worker PID ${worker.worker.pid}`);
           const room = rooms.get(roomId);
 
           const peerDetails = {
