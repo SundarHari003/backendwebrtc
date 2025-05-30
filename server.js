@@ -4,28 +4,20 @@ const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
-const https = require('https');
-const fs = require('fs');
-const rateLimit = require('express-rate-limit');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
-const server = https.createServer({
-  cert: fs.readFileSync('./ssl/cert.pem'),
-  key: fs.readFileSync('./ssl/key.pem')
-}, app);
-// const server = http.createServer(app);
+
+const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
   }
 });
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // Limit each IP to 100 requests per windowMs
-}));
+
 // Mediasoup settings
 const mediasoupSettings = {
   worker: {
@@ -33,7 +25,7 @@ const mediasoupSettings = {
     rtcMaxPort: 49999,
     logLevel: 'warn',
     logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp', 'rtx', 'bwe', 'score', 'simulcast'],
-    announcedIp: '10.204.253.43'
+    announcedIp: '184.72.81.244'
   },
   router: {
     mediaCodecs: [
@@ -76,7 +68,7 @@ const mediasoupSettings = {
     listenIps: [
       {
         ip: '0.0.0.0',
-        announcedIp: '10.204.253.43' // Will be set dynamically
+        announcedIp: '184.72.81.244' // Will be set dynamically
       }
     ],
     initialAvailableOutgoingBitrate: 1000000,
@@ -86,34 +78,10 @@ const mediasoupSettings = {
     enableTcp: true,
     preferUdp: true,
     enableSctp: true,
-    iceConsentTimeout: 30,
-    iceServers: [
-      {
-        urls: "stun:stun.relay.metered.ca:80",
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80",
-        username: "809b412749942c1dd719a575",
-        credential: "IGrizVaKruezuMCE",
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-        username: "809b412749942c1dd719a575",
-        credential: "IGrizVaKruezuMCE",
-      },
-      {
-        urls: "turn:global.relay.metered.ca:443",
-        username: "809b412749942c1dd719a575",
-        credential: "IGrizVaKruezuMCE",
-      },
-      {
-        urls: "turns:global.relay.metered.ca:443?transport=udp",
-        username: "809b412749942c1dd719a575",
-        credential: "IGrizVaKruezuMCE",
-      },
-    ],
-    iceTransportPolicy: 'relay'
-
+    numSctpStreams: {
+      OS: 1024, // Outgoing streams
+      MIS: 1024 // Incoming streams
+    }
   }
 };
 
@@ -610,8 +578,6 @@ async function startServer() {
         const { transport, params } = await room.createWebRtcTransport(socket.id, direction);
         // Store transport reference for cleanup
         room.storeTransport(socket.id, transport, direction);
-        console.log(params,"checl");
-        
         return { params };
       }));
 
