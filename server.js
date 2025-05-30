@@ -92,13 +92,13 @@ const mediasoupSettings = {
         protocol: 'udp',
         ip: '0.0.0.0',
         announcedIp: localIp,
-        port: 40000
+        portRange: { min: 40000, max: 49999 }
       },
       {
         protocol: 'tcp',
         ip: '0.0.0.0',
         announcedIp: localIp,
-        port: 40000
+        portRange: { min: 40000, max: 49999 }
       }
     ],
     initialAvailableOutgoingBitrate: 1000000,
@@ -147,13 +147,13 @@ async function initializeWorkerPool() {
           protocol: 'udp',
           ip: '0.0.0.0',
           announcedIp: localIp, // Your public IP
-          port: 40000 + (i * 100) // Distribute ports across workers
+          portRange: { min: 40000, max: 49999 }// Distribute ports across workers
         },
         {
           protocol: 'tcp',
           ip: '0.0.0.0',
           announcedIp: localIp, // Your public IP
-          port: 40000 + (i * 100) // Same port for TCP
+          portRange: { min: 40000, max: 49999 }// Same port for TCP
         }
       ]
     });
