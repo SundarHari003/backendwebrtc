@@ -1,11 +1,17 @@
 const express = require('express');
-const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const mediasoup = require('mediasoup');
 const cors = require('cors');
 const Room = require('./Room');
 const os = require('os');
 const ifaces = os.networkInterfaces()
+const fs = require('fs');
+
+const sslOptions = {
+  key: fs.readFileSync('./ssl/key.pem'),
+  cert: fs.readFileSync('./ssl/cert.pem'),
+};
 
 const getLocalIp = () => {
   let localIp = '127.0.0.1'
@@ -32,7 +38,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-const server = http.createServer(app);
+const server = https.createServer(sslOptions,app);
 const io = new Server(server, {
   cors: {
     origin: '*',
